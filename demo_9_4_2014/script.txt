@@ -61,3 +61,7 @@ scenario: POST a binary PDF file to http://localhost:9919/gsdemo/<patientID>
 	* code 
 		do response.Stream.Write(context.obxMessage)
 
+Test with:
+
+curl -v -X POST --header "content-type:application/pdf" --data-binary "@DSUMM.pdf" http://_system:SYS@localhost:9919/gdemo/55 | tr '\r' '\n' | more
+
