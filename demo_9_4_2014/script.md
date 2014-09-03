@@ -1,0 +1,63 @@
+script
+======
+
+scenario: POST a binary PDF file to http://localhost:9919/gsdemo/<patientID>
+	Use the patientID from the URL to run a query against external SQL
+	datasource, pulling back patient demographics.
+	Use data from SQL to build an HL7 ORU^R01 message
+	Base 64 encode the PDF in OBX segments according to the MIM RFC 2045
+	specification.
+
+* Create SQL Gateway DSN=Samples
+	System Administration/Configuration/Connectivity/SQL Gateway Connections
+
+* Create new production
+
+* Add EnsLib.HTTP.Service
+	Note Port
+
+* Add EnsUtils.SQL.SQLGatewayOperation
+	SQL = "select * from Sample.Person where ID = ?"
+	ConnectionName = <from above>
+
+* Build new business process
+	* assign context.patientId = (new context variable - %String)
+			$piece(request.HTTPHeaders.GetAt("URL"),"/",*)	
+	* trace context.patientId
+	* call EnsUtils.SQL.SQLGatewayOperation
+		request = insert callrequest.Data context.patientId
+		response = context.patientDataSnapshot (new context variable)
+	* <BUILD OBX Transform>
+		source = request
+		target = context.obxMessage (new EnsLib.HL7.Message context variable)
+
+<assign value='"ORU"' property='target.{MSH:MessageType.MessageCode}' action='set' />
+<assign value='"R01"' property='target.{MSH:MessageType.TriggerEvent}' action='set' />
+<assign value='..CurrentDateTime()' property='target.{MSH:DateTimeOfMessage}' action='set' />
+<assign value='##class(EnsUtils.Rule.FunctionSet).BLOBToBase64RFC2045MIMELines(source.Stream)' property='b64' action='set' />
+<assign value='1' property='target.{PIDgrpgrp(1).PIDgrp.PID:SetIDPID}' action='set' />
+<foreach property='b64' key='li' >
+<assign value='li' property='target.{PIDgrpgrp(1).ORCgrp(1).OBXgrp(li).OBX:SetIDOBX}' action='set' />
+<assign value='b64.GetAt(li)' property='target.{PIDgrpgrp(1).ORCgrp(1).OBXgrp(li).OBX:ObservationValue(1)}' action='set' />
+</foreach>		
+
+	* <BUILD ORU Transform>
+		create = existing !!!!
+		source = context.patientDataSnapshot
+		target = context.obxMessage
+
+<if condition='source.Next()' >
+<true>
+<trace value='source.Get("Name")' />
+<assign value='source.Get("Name")' property='name' action='set' />
+<assign value='..Piece(name)' property='target.{PIDgrpgrp(1).PIDgrp.PID:PatientName(1).FamilyName}' action='set' />
+<assign value='..Piece(..Piece(name,,2)," ",1)' property='target.{PIDgrpgrp(1).PIDgrp.PID:PatientName(1).GivenName}' action='set' />
+</true>
+</if>
+
+
+	* assign set response.Stream = 
+		##class(%GlobalBinaryStream).%New()
+	* code 
+		do response.Stream.Write(context.obxMessage)
+
